@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: order-fulfillment-nats
+
+nats:
+  server:
+    url: nats://localhost:4222
+  orders:
+    worker-count: 3
+    ack-wait-seconds: 10
+
+server:
+  port: 8080
+
+logging:
+  level:
+    in.phani.orderfulfillment: DEBUG

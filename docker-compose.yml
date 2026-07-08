@@ -1,0 +1,21 @@
+services:
+  nats:
+    image: nats:2.14-alpine
+    container_name: nats
+    command: >
+      -js
+      -sd /data
+      -m 8222
+    ports:
+      - "4222:4222"   # client connections
+      - "8222:8222"   # HTTP monitoring (http://localhost:8222/varz, /jsz, etc.)
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  nats-data:
