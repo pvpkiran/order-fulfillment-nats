@@ -4,9 +4,11 @@ import io.nats.client.Connection;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
 import io.nats.client.KeyValueManagement;
+import io.nats.client.ObjectStoreManagement;
 import io.nats.client.api.AckPolicy;
 import io.nats.client.api.ConsumerConfiguration;
 import io.nats.client.api.KeyValueConfiguration;
+import io.nats.client.api.ObjectStoreConfiguration;
 import io.nats.client.api.RetentionPolicy;
 import io.nats.client.api.StorageType;
 import io.nats.client.api.StreamConfiguration;
@@ -20,10 +22,10 @@ import java.io.IOException;
 import java.time.Duration;
 
 /**
- * Creates the ORDERS stream, its durable pull consumer, and the
- * order-status KV bucket on startup if they don't already exist, so
- * `mvn spring-boot:run` against a fresh NATS server just works without a
- * separate provisioning step.
+ * Creates the ORDERS stream, its durable pull consumer, the order-status KV
+ * bucket, and the invoices Object Store bucket on startup if they don't
+ * already exist, so `mvn spring-boot:run` against a fresh NATS server just
+ * works without a separate provisioning step.
  *
  * WorkQueue retention means each message is removed from the stream once a
  * consumer acknowledges it - appropriate here because "process this order"
@@ -45,6 +47,7 @@ public class JetStreamConfig {
     private static final long MAX_DELIVER = 5;
 
     public static final String ORDER_STATUS_BUCKET = "order-status";
+    public static final String INVOICES_BUCKET = "invoices";
 
     @Value("${nats.orders.ack-wait-seconds:10}")
     private long ackWaitSeconds;
@@ -61,6 +64,7 @@ public class JetStreamConfig {
         bootstrapOrdersStream(jsm);
         bootstrapOrderWorkersConsumer(jsm);
         bootstrapOrderStatusBucket();
+        bootstrapInvoicesBucket();
     }
 
     private void bootstrapOrdersStream(JetStreamManagement jsm) throws IOException, JetStreamApiException {
@@ -128,5 +132,29 @@ public class JetStreamConfig {
 
         kvm.create(kvConfig);
         log.info("🆕 Created KV bucket [{}]", ORDER_STATUS_BUCKET);
+    }
+
+    /**
+     * Same idempotent create-if-missing pattern as the KV bucket above, but
+     * an Object Store bucket rather than a KV one - built for larger blobs
+     * (NATS chunks them automatically) rather than small, overwritten-in-
+     * place values. Distinct JetStream resource, distinct access pattern,
+     * same bootstrap shape.
+     */
+    private void bootstrapInvoicesBucket() throws IOException, JetStreamApiException {
+        ObjectStoreManagement osm = natsConnection.objectStoreManagement();
+
+        if (osm.getBucketNames().contains(INVOICES_BUCKET)) {
+            log.info("✅ Object Store bucket [{}] already exists", INVOICES_BUCKET);
+            return;
+        }
+
+        ObjectStoreConfiguration osConfig = ObjectStoreConfiguration.builder()
+                .name(INVOICES_BUCKET)
+                .storageType(StorageType.File)
+                .build();
+
+        osm.create(osConfig);
+        log.info("🆕 Created Object Store bucket [{}]", INVOICES_BUCKET);
     }
 }

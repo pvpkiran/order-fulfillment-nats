@@ -6,6 +6,8 @@ import in.phani.orderfulfillment.config.JetStreamConfig;
 import in.phani.orderfulfillment.domain.Order;
 import in.phani.orderfulfillment.domain.OrderStatus;
 import in.phani.orderfulfillment.kv.OrderStatusStore;
+import in.phani.orderfulfillment.objectstore.InvoiceGenerator;
+import in.phani.orderfulfillment.objectstore.InvoiceStore;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
@@ -39,11 +41,14 @@ public class OrderPullConsumer {
     private final JetStream jetStream;
     private final ObjectMapper objectMapper;
     private final OrderStatusStore orderStatusStore;
+    private final InvoiceStore invoiceStore;
 
-    public OrderPullConsumer(Connection natsConnection, ObjectMapper objectMapper, OrderStatusStore orderStatusStore) throws IOException {
+    public OrderPullConsumer(Connection natsConnection, ObjectMapper objectMapper,
+                             OrderStatusStore orderStatusStore, InvoiceStore invoiceStore) throws IOException {
         this.jetStream = natsConnection.jetStream();
         this.objectMapper = objectMapper;
         this.orderStatusStore = orderStatusStore;
+        this.invoiceStore = invoiceStore;
     }
 
     /** Opens a new pull subscription bound to the shared durable consumer. */
@@ -89,6 +94,11 @@ public class OrderPullConsumer {
             // a KV write failure gets retried the same way a processing
             // failure would, instead of silently leaving status stale.
             orderStatusStore.putStatus(order.id(), OrderStatus.PAID);
+
+            // Same before-ack placement and reasoning as the status write
+            // above: a failure here also falls into the nak-and-retry path
+            // rather than acking an order that never got its invoice.
+            invoiceStore.putInvoice(order.id(), InvoiceGenerator.generate(order));
 
             msg.ack();
             log.info("✅ [{}] Order [{}] processed and acked", workerName, order.id());

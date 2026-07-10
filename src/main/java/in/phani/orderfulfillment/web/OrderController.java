@@ -3,9 +3,12 @@ package in.phani.orderfulfillment.web;
 import in.phani.orderfulfillment.domain.Order;
 import in.phani.orderfulfillment.domain.OrderStatus;
 import in.phani.orderfulfillment.kv.OrderStatusStore;
+import in.phani.orderfulfillment.objectstore.InvoiceStore;
 import in.phani.orderfulfillment.publisher.OrderPublisher;
 import io.nats.client.api.PublishAck;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,10 +26,12 @@ public class OrderController {
 
     private final OrderPublisher orderPublisher;
     private final OrderStatusStore orderStatusStore;
+    private final InvoiceStore invoiceStore;
 
-    public OrderController(OrderPublisher orderPublisher, OrderStatusStore orderStatusStore) {
+    public OrderController(OrderPublisher orderPublisher, OrderStatusStore orderStatusStore, InvoiceStore invoiceStore) {
         this.orderPublisher = orderPublisher;
         this.orderStatusStore = orderStatusStore;
+        this.invoiceStore = invoiceStore;
     }
 
     public record CreateOrderRequest(String customerId, String description, BigDecimal amount) {
@@ -53,6 +58,16 @@ public class OrderController {
     public ResponseEntity<?> getOrderStatus(@PathVariable String orderId) {
         return orderStatusStore.getStatus(orderId)
                 .<ResponseEntity<?>>map(status -> ResponseEntity.ok(Map.of("orderId", orderId, "status", status)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @GetMapping("/{orderId}/invoice")
+    public ResponseEntity<byte[]> getInvoice(@PathVariable String orderId) {
+        return invoiceStore.getInvoice(orderId)
+                .map(bytes -> ResponseEntity.ok()
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice-" + orderId + ".txt\"")
+                        .body(bytes))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 }
