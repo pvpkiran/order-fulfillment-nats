@@ -25,24 +25,12 @@ The app connects to `nats://localhost:4222` by default (see `application.yml`). 
 
 ## Architecture
 
-```
-Client
-  |
-  |-- POST /orders --------------------> OrderPublisher --> ORDERS stream (orders.new)
-  |                                                                |
-  |                                                    OrderPullConsumer workers (x3)
-  |                                                     pull + ack/nak/term
-  |                                                                |
-  |                                              order-status KV bucket <--- OrderStatusWatcher (live)
-  |                                                                |
-  |                                              invoices Object Store bucket
-  |
-  |-- GET /orders/{id}/status ---------> reads order-status KV directly
-  |-- GET /orders/{id}/invoice --------> reads invoices Object Store directly
-  |
-  |-- nats request order.get/cancel ---> order-query-service (NATS Services Framework)
-                                          independent access path, same KV bucket
-```
+![order-fulfillment-nats architecture](docs/architecture.svg)
+
+- The **stream** is the durable event log - every order published, in order, kept until acked.
+- The **KV bucket** is current state only - `PENDING` -> `PAID` -> (optionally) `CANCELLED` - overwritten in place, watched live.
+- The **Object Store** holds the invoice blob, referenced by order id.
+- `order-query-service` and the REST controller are two independent paths into the same KV bucket - one for NATS-native callers, one for HTTP.
 
 ## REST endpoints
 
