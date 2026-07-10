@@ -8,6 +8,7 @@ nats:
   orders:
     worker-count: 3
     ack-wait-seconds: 10
+    query-service-instance-count: 3
 
 server:
   port: 8080

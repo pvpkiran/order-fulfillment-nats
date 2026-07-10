@@ -34,11 +34,6 @@ public class OrderPublisher {
             byte[] payload = objectMapper.writeValueAsBytes(order);
 
             Headers headers = new Headers();
-            // The order's own id doubles as the JetStream dedup key: if this
-            // exact order id is published again within the stream's dedup
-            // window, the server silently drops the duplicate rather than
-            // storing (and later processing) it twice. Matters if a caller
-            // retries a POST /orders after a network timeout, for example.
             headers.add("Nats-Msg-Id", order.id());
 
             Message message = NatsMessage.builder()
@@ -48,7 +43,7 @@ public class OrderPublisher {
                     .build();
 
             PublishAck ack = jetStream.publish(message);
-            log.info("📤 Published order [{}] to stream [{}] seq={} duplicate={}",
+            log.info("Published order [{}] to stream [{}] seq={} duplicate={}",
                     order.id(), ack.getStream(), ack.getSeqno(), ack.isDuplicate());
             return ack;
         } catch (IOException | JetStreamApiException e) {

@@ -14,14 +14,6 @@ import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Optional;
 
-/**
- * Wraps put/get on the "invoices" Object Store bucket. Unlike the KV
- * bucket (small values, overwritten in place, see OrderStatusStore), this
- * is built for larger blobs - NATS chunks them automatically under the
- * hood, which is the wrong fit for a JetStream message or a KV value
- * directly. Keyed by order id, same as OrderStatusStore, but a completely
- * different underlying JetStream resource.
- */
 @Component
 public class InvoiceStore {
 
@@ -36,7 +28,7 @@ public class InvoiceStore {
     public void putInvoice(String orderId, byte[] pdfBytes) {
         try {
             ObjectInfo info = invoiceStore.put(orderId, pdfBytes);
-            log.info("🧾 Stored invoice for order [{}] ({} bytes, {} chunk(s))",
+            log.info("Stored invoice for order [{}] ({} bytes, {} chunk(s))",
                     orderId, info.getSize(), info.getChunks());
         } catch (IOException | JetStreamApiException | NoSuchAlgorithmException e) {
             throw new IllegalStateException("Failed to store invoice for order " + orderId, e);
@@ -49,10 +41,6 @@ public class InvoiceStore {
             invoiceStore.get(orderId, buffer);
             return Optional.of(buffer.toByteArray());
         } catch (JetStreamApiException e) {
-            // Unlike KeyValue.get() (which returns null for a missing key),
-            // ObjectStore.get() throws when the object doesn't exist or was
-            // deleted - so a missing invoice surfaces here rather than as
-            // a null/empty result.
             return Optional.empty();
         } catch (IOException | InterruptedException | NoSuchAlgorithmException e) {
             throw new IllegalStateException("Failed to read invoice for order " + orderId, e);

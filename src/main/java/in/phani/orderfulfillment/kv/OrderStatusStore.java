@@ -14,13 +14,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
-/**
- * Wraps the "order-status" KV bucket - this answers "what's the CURRENT
- * state of order X right now", which is a different question from what
- * the ORDERS stream answers ("what has happened to order X, in order,
- * ever"). See OrderStatusWatcher for the live/push counterpart to the
- * one-off lookup in getStatus() below.
- */
 @Component
 public class OrderStatusStore {
 
@@ -35,7 +28,7 @@ public class OrderStatusStore {
     public void putStatus(String orderId, OrderStatus status) {
         try {
             long revision = orderStatusKv.put(orderId, status.name().getBytes(StandardCharsets.UTF_8));
-            log.info("📝 Order [{}] status -> {} (revision {})", orderId, status, revision);
+            log.info("Order [{}] status -> {} (revision {})", orderId, status, revision);
         } catch (IOException | JetStreamApiException e) {
             throw new IllegalStateException("Failed to update status for order " + orderId, e);
         }

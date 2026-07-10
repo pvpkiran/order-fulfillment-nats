@@ -14,14 +14,6 @@ import org.springframework.context.annotation.Configuration;
 
 import java.time.Duration;
 
-/**
- * Connection setup deliberately includes reconnect/error handling from the
- * start, rather than bolting it on later - this is the piece most demo apps
- * skip, and it's what determines whether in-flight work survives a NATS
- * server restart. The nats.java client already reconnects and resubscribes
- * automatically by default; the listeners below exist so that behavior is
- * visible (logged) rather than silent.
- */
 @Configuration
 public class NatsConfig {
 
@@ -35,34 +27,28 @@ public class NatsConfig {
         Options options = new Options.Builder()
                 .server(natsUrl)
                 .connectionName("order-fulfillment-app")
-                .maxReconnects(-1) // retry indefinitely rather than giving up after N attempts
+                .maxReconnects(-1)
                 .reconnectWait(Duration.ofSeconds(1))
                 .connectionListener(this::onConnectionEvent)
                 .errorListener(new LoggingErrorListener())
                 .build();
 
         Connection connection = Nats.connect(options);
-        log.info("✅ Connected to NATS at {}", natsUrl);
+        log.info("Connected to NATS at {}", natsUrl);
         return connection;
     }
 
     private void onConnectionEvent(Connection conn, ConnectionListener.Events type) {
         switch (type) {
-            case CONNECTED -> log.info("✅ Connected");
-            case DISCONNECTED -> log.warn("⚠️  Disconnected from NATS - client will retry automatically");
-            case RECONNECTED -> log.info("🔄 Reconnected - subscriptions resume automatically");
-            case RESUBSCRIBED -> log.info("🔁 Resubscribed after reconnect");
-            case CLOSED -> log.warn("🛑 Connection closed - no further reconnects will be attempted");
+            case CONNECTED -> log.info("Connected");
+            case DISCONNECTED -> log.warn("Disconnected from NATS - will retry automatically");
+            case RECONNECTED -> log.info("Reconnected - subscriptions resumed automatically");
+            case RESUBSCRIBED -> log.info("Resubscribed after reconnect");
+            case CLOSED -> log.warn("Connection closed - no further reconnects will be attempted");
             default -> log.debug("NATS connection event: {}", type);
         }
     }
 
-    /**
-     * Method set matches jnats 2.25.x. If this doesn't compile against a
-     * different client version, check io.nats.client.ErrorListener's javadoc
-     * for that version - most methods on this interface have defaults, so
-     * only override what you actually want to log.
-     */
     private static class LoggingErrorListener implements ErrorListener {
         @Override
         public void errorOccurred(Connection conn, String error) {

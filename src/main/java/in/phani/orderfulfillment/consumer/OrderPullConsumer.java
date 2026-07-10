@@ -22,15 +22,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 
-/**
- * Wraps a single pull subscription bound to the shared "order-workers"
- * durable consumer. Multiple subscriptions (see OrderWorkerRunner, which
- * opens one per worker) can bind to the SAME durable name concurrently -
- * the server hands out distinct messages across them, which is what gives
- * pull consumers their horizontal-scaling behavior: similar in spirit to a
- * core NATS queue group, but with per-message acknowledgement, redelivery,
- * and durability that queue groups don't have.
- */
 @Component
 public class OrderPullConsumer {
 
@@ -51,23 +42,14 @@ public class OrderPullConsumer {
         this.invoiceStore = invoiceStore;
     }
 
-    /** Opens a new pull subscription bound to the shared durable consumer. */
     public JetStreamSubscription bindSubscription() throws IOException, JetStreamApiException {
         PullSubscribeOptions pullOptions = PullSubscribeOptions.builder()
                 .stream(JetStreamConfig.ORDERS_STREAM)
                 .durable(JetStreamConfig.ORDER_WORKERS_DURABLE)
                 .build();
-        // The subject argument is left null - the durable consumer's own
-        // filterSubject (orders.new, set in JetStreamConfig) already scopes
-        // this subscription, so there's nothing extra to specify here.
         return jetStream.subscribe(null, pullOptions);
     }
 
-    /**
-     * One fetch-process-ack cycle. Returns how many messages were handled,
-     * so a caller can decide whether to loop again immediately (there was
-     * work) or pause briefly (there wasn't, no point hammering the server).
-     */
     public int pollOnce(JetStreamSubscription subscription, String workerName) {
         List<Message> messages = subscription.fetch(BATCH_SIZE, FETCH_MAX_WAIT);
 
@@ -83,53 +65,36 @@ public class OrderPullConsumer {
 
         try {
             Order order = objectMapper.readValue(msg.getData(), Order.class);
-            log.info("⚙️  [{}] Processing order [{}] (delivery #{}): {}",
+            log.info("[{}] Processing order [{}] (delivery #{}): {}",
                     workerName, order.id(), deliveryCount, order.description());
 
             simulateProcessing(order, deliveryCount);
 
-            // Written BEFORE ack, deliberately: if this throws, it falls
-            // into the catch (Exception e) branch below and nak()s rather
-            // than acking a message whose status update never landed - so
-            // a KV write failure gets retried the same way a processing
-            // failure would, instead of silently leaving status stale.
             orderStatusStore.putStatus(order.id(), OrderStatus.PAID);
-
-            // Same before-ack placement and reasoning as the status write
-            // above: a failure here also falls into the nak-and-retry path
-            // rather than acking an order that never got its invoice.
             invoiceStore.putInvoice(order.id(), InvoiceGenerator.generate(order));
 
             msg.ack();
-            log.info("✅ [{}] Order [{}] processed and acked", workerName, order.id());
+            log.info("[{}] Order [{}] processed and acked", workerName, order.id());
 
         } catch (JsonProcessingException e) {
-            // The payload itself is malformed - no number of retries fixes
-            // that, so terminate rather than let it keep coming back until
-            // maxDeliver quietly exhausts itself.
-            log.error("💀 [{}] Unparseable order payload - terminating (poison pill): {}", workerName, e.getMessage());
+            log.error("[{}] Unparseable order payload - terminating: {}", workerName, e.getMessage());
             msg.term();
 
         } catch (TransientProcessingException e) {
-            // Something recoverable went wrong - nak() tells the server to
-            // redeliver immediately rather than waiting out the full
-            // ackWait timer, which is what makes the redelivery demo fast.
-            log.warn("🔁 [{}] Transient failure, nak'ing order [{}] for redelivery: {}",
+            log.warn("[{}] Transient failure, nak'ing order [{}] for redelivery: {}",
                     workerName, e.orderId(), e.getMessage());
             msg.nak();
 
         } catch (Exception e) {
-            log.error("💥 [{}] Unexpected error processing message - nak'ing for redelivery", workerName, e);
+            log.error("[{}] Unexpected error processing message - nak'ing for redelivery", workerName, e);
             msg.nak();
         }
     }
 
     /**
-     * Demo-only hook: an order whose description contains SIMULATE_FAILURE
-     * fails on its first delivery and succeeds on every delivery after -
-     * this lets the nak -> redeliver path be exercised deterministically
-     * (in a test, or by hand with curl) without needing to actually kill a
-     * worker process mid-flight.
+     * An order whose description contains SIMULATE_FAILURE fails on its
+     * first delivery and succeeds on redelivery - lets the nak/redeliver
+     * path be exercised on demand without killing a worker process.
      */
     private void simulateProcessing(Order order, long deliveryCount) throws TransientProcessingException {
         if (deliveryCount == 1 && order.description() != null && order.description().contains("SIMULATE_FAILURE")) {

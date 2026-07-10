@@ -42,9 +42,6 @@ public class OrderController {
         Order order = Order.newOrder(request.customerId(), request.description(), request.amount());
         PublishAck ack = orderPublisher.publishNewOrder(order);
 
-        // Written here, synchronously, right after the publish is confirmed -
-        // so a GET /orders/{id}/status immediately after this returns PENDING
-        // rather than 404, even before any worker has picked the order up.
         orderStatusStore.putStatus(order.id(), OrderStatus.PENDING);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
