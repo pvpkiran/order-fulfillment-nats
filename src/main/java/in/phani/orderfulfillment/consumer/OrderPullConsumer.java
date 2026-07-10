@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import in.phani.orderfulfillment.config.JetStreamConfig;
 import in.phani.orderfulfillment.domain.Order;
+import in.phani.orderfulfillment.domain.OrderStatus;
+import in.phani.orderfulfillment.kv.OrderStatusStore;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
@@ -36,10 +38,12 @@ public class OrderPullConsumer {
 
     private final JetStream jetStream;
     private final ObjectMapper objectMapper;
+    private final OrderStatusStore orderStatusStore;
 
-    public OrderPullConsumer(Connection natsConnection, ObjectMapper objectMapper) throws IOException {
+    public OrderPullConsumer(Connection natsConnection, ObjectMapper objectMapper, OrderStatusStore orderStatusStore) throws IOException {
         this.jetStream = natsConnection.jetStream();
         this.objectMapper = objectMapper;
+        this.orderStatusStore = orderStatusStore;
     }
 
     /** Opens a new pull subscription bound to the shared durable consumer. */
@@ -78,6 +82,13 @@ public class OrderPullConsumer {
                     workerName, order.id(), deliveryCount, order.description());
 
             simulateProcessing(order, deliveryCount);
+
+            // Written BEFORE ack, deliberately: if this throws, it falls
+            // into the catch (Exception e) branch below and nak()s rather
+            // than acking a message whose status update never landed - so
+            // a KV write failure gets retried the same way a processing
+            // failure would, instead of silently leaving status stale.
+            orderStatusStore.putStatus(order.id(), OrderStatus.PAID);
 
             msg.ack();
             log.info("✅ [{}] Order [{}] processed and acked", workerName, order.id());

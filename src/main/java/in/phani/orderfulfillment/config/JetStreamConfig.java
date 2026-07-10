@@ -3,8 +3,10 @@ package in.phani.orderfulfillment.config;
 import io.nats.client.Connection;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
+import io.nats.client.KeyValueManagement;
 import io.nats.client.api.AckPolicy;
 import io.nats.client.api.ConsumerConfiguration;
+import io.nats.client.api.KeyValueConfiguration;
 import io.nats.client.api.RetentionPolicy;
 import io.nats.client.api.StorageType;
 import io.nats.client.api.StreamConfiguration;
@@ -18,9 +20,10 @@ import java.io.IOException;
 import java.time.Duration;
 
 /**
- * Creates the ORDERS stream and its durable pull consumer on startup if
- * they don't already exist, so `mvn spring-boot:run` against a fresh NATS
- * server just works without a separate provisioning step.
+ * Creates the ORDERS stream, its durable pull consumer, and the
+ * order-status KV bucket on startup if they don't already exist, so
+ * `mvn spring-boot:run` against a fresh NATS server just works without a
+ * separate provisioning step.
  *
  * WorkQueue retention means each message is removed from the stream once a
  * consumer acknowledges it - appropriate here because "process this order"
@@ -41,6 +44,8 @@ public class JetStreamConfig {
     public static final String NEW_ORDER_SUBJECT = "orders.new";
     private static final long MAX_DELIVER = 5;
 
+    public static final String ORDER_STATUS_BUCKET = "order-status";
+
     @Value("${nats.orders.ack-wait-seconds:10}")
     private long ackWaitSeconds;
 
@@ -55,6 +60,7 @@ public class JetStreamConfig {
         JetStreamManagement jsm = natsConnection.jetStreamManagement();
         bootstrapOrdersStream(jsm);
         bootstrapOrderWorkersConsumer(jsm);
+        bootstrapOrderStatusBucket();
     }
 
     private void bootstrapOrdersStream(JetStreamManagement jsm) throws IOException, JetStreamApiException {
@@ -98,5 +104,29 @@ public class JetStreamConfig {
         jsm.addOrUpdateConsumer(ORDERS_STREAM, consumerConfig);
         log.info("🆕 Durable consumer [{}] ready on subject [{}] (ackWait={}s, maxDeliver={})",
                 ORDER_WORKERS_DURABLE, NEW_ORDER_SUBJECT, ackWaitSeconds, MAX_DELIVER);
+    }
+
+    /**
+     * A KV bucket is itself just a specially-configured stream under the
+     * hood (each key is modeled as a subject), which is why this bootstrap
+     * lives in the same class as the stream/consumer setup above rather
+     * than off in its own file - conceptually it's the same kind of
+     * "make sure this JetStream resource exists" step.
+     */
+    private void bootstrapOrderStatusBucket() throws IOException, JetStreamApiException {
+        KeyValueManagement kvm = natsConnection.keyValueManagement();
+
+        if (kvm.getBucketNames().contains(ORDER_STATUS_BUCKET)) {
+            log.info("✅ KV bucket [{}] already exists", ORDER_STATUS_BUCKET);
+            return;
+        }
+
+        KeyValueConfiguration kvConfig = KeyValueConfiguration.builder()
+                .name(ORDER_STATUS_BUCKET)
+                .storageType(StorageType.File)
+                .build();
+
+        kvm.create(kvConfig);
+        log.info("🆕 Created KV bucket [{}]", ORDER_STATUS_BUCKET);
     }
 }
