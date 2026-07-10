@@ -25,7 +25,7 @@ The app connects to `nats://localhost:4222` by default (see `application.yml`). 
 
 ## Architecture
 
-![order-fulfillment-nats architecture](docs/architecture.svg)
+![order-fulfillment-nats architecture](architecture.svg)
 
 - The **stream** is the durable event log - every order published, in order, kept until acked.
 - The **KV bucket** is current state only - `PENDING` -> `PAID` -> (optionally) `CANCELLED` - overwritten in place, watched live.
